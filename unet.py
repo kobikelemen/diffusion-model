@@ -47,7 +47,8 @@ class UNet(nn.Module):
     """ Using a UNet architecture as noise function approximator """
     def __init__(self, num_steps=1000, emb_dim=100):
         super(UNet, self).__init__()
-        self.time_embed = make_time_embedding(num_steps, emb_dim)
+        self.time_embed = make_time_embedding(num_steps+1, emb_dim)
+        # print(f'time embed shape: {self.time_embed.shape}')
         self.te1 = make_time_embedding_mlp(emb_dim, 1)
         self.b1 = nn.Sequential(
             Block((1, 28, 28), 1, 10),

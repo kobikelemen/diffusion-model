@@ -14,11 +14,13 @@ from math import sqrt
 from unet import UNet
 
 learning_rate = 1e-3
-num_epochs = 20
+num_epochs = 15
 batch_size = 100
 # beta = 0.01
-min_beta = 10**-4
-max_beta = 0.02
+# min_beta = 10**-4
+# max_beta = 0.02
+min_beta = 0.01
+max_beta = 0.01
 timesteps = 1000
 img_w = 28
 img_h = 28
@@ -47,12 +49,16 @@ def calc_xt(epsilon, t, x0):
     # for i in range(batch_size):
     #     for j in range(t[i]):
     #         at_hat[i] *= (1 - calc_beta(min_beta, max_beta, j, timesteps))
-    at_hat = (1 - calc_beta(min_beta, max_beta, t, timesteps)) ** t
+    # at_hat = (1 - calc_beta(min_beta, max_beta, t, timesteps)) ** t
+    at_hat = 1
+    for s in range(1,t[0]+1):
+        at_hat *= (1 - calc_beta(min_beta, max_beta, s, timesteps))
     # print(f'at: {at.shape} x0: {x0.shape} epsilon: {epsilon.shape}')
-    return torch.sqrt(at_hat.view(batch_size,1,1,1)) * x0 + torch.sqrt(1 - at_hat.view(batch_size,1,1,1)) * epsilon
+    # return torch.sqrt(at_hat.view(batch_size,1,1,1)) * x0 + torch.sqrt(1 - at_hat.view(batch_size,1,1,1)) * epsilon
+    return sqrt(at_hat) * x0 + sqrt(1 - at_hat) * epsilon
 
 def sample_t(batch_size, timesteps):
-    t = random.randint(1,timesteps-1)
+    t = random.randint(1,timesteps)
     return torch.full((batch_size,), t)
     # return torch.randint(1, timesteps, (batch_size,))
 
@@ -63,7 +69,8 @@ def calc_loss(epsilon, epsilon_pred):
     return torch.linalg.vector_norm(epsilon - epsilon_pred)
 
 def calc_beta(min_b, max_b, t, max_t):
-    return min_b + (t/max_t) * (max_b - min_b) 
+    beta = min_b + (t/max_t) * (max_b - min_b) 
+    return beta
 
 torch.set_default_device(device)
 model = UNet(num_steps=timesteps).to(device)
@@ -84,7 +91,6 @@ for epoch in range(num_epochs):
             data = data.to(device)
             epsilon = sample_epsilon(batch_size, img_h, img_w)
             t = sample_t(batch_size, timesteps)
-            print(f't: {t}')
             # beta = calc_beta(min_beta, max_beta, t, timesteps)
             xt = calc_xt(epsilon, t, data)
             epsilon_pred = model(xt, t)
@@ -108,7 +114,6 @@ for epoch in range(num_epochs):
                 with torch.no_grad():
                     epsilon = sample_epsilon(batch_size, img_h, img_w)
                     t = sample_t(batch_size, timesteps)
-                    print(f't: {t}')
                     # beta = calc_beta(min_beta, max_beta, t, timesteps)
                     xt = calc_xt(epsilon, t, data)
                     epsilon_pred = model(xt, t)
@@ -120,7 +125,7 @@ for epoch in range(num_epochs):
         
 
 
-torch.save(model.state_dict(), '/home/kk2720/dl/diffusion-model/model/mnist_simple_diffusion6.pt')
+torch.save(model.state_dict(), '/home/kk2720/dl/diffusion-model/model/mnist_simple_diffusion9.pt')
 
 
 epochs = [i for i in range(num_epochs)]
@@ -128,4 +133,4 @@ plt.plot(epochs, train_loss, label='Train Loss')
 plt.plot(epochs, test_loss, label='Test Loss')
 plt.title('Loss')
 plt.ylabel('Epochs')
-plt.savefig('/home/kk2720/dl/diffusion-model/plots/simple_diffusion_loss6.jpeg')
+plt.savefig('/home/kk2720/dl/diffusion-model/plots/simple_diffusion_loss9.jpeg')
