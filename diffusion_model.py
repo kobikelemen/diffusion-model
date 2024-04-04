@@ -15,7 +15,7 @@ from unet import UNet
 
 learning_rate = 1e-3
 num_epochs = 15
-batch_size = 100
+batch_size = 20
 # beta = 0.01
 # min_beta = 10**-4
 # max_beta = 0.02
@@ -81,6 +81,7 @@ print("Total number of parameters is: {}".format(params))
 
 
 train_loss, test_loss = [], []
+min_test_loss = 10e10
 
 for epoch in range(num_epochs):
     epoch_train_loss = 0
@@ -120,12 +121,16 @@ for epoch in range(num_epochs):
                     # loss = calc_loss(epsilon, epsilon_pred)
                     loss = mse(epsilon, epsilon_pred)
                     epoch_test_loss += loss.item() * len(data) / len(loader_test.dataset)
+                    if batch_idx % 20 == 0:
+                        tepoch.set_description(f"Train Epoch {epoch}")
+                        tepoch.set_postfix(loss=epoch_test_loss)
             print(f'Test Loss: {epoch_test_loss}')
             test_loss.append(epoch_test_loss)
         
 
-
-torch.save(model.state_dict(), '/home/kk2720/dl/diffusion-model/model/mnist_simple_diffusion9.pt')
+        if epoch_test_loss < min_test_loss:
+            torch.save(model.state_dict(), '/home/kk2720/dl/diffusion-model/model/mnist_simple_diffusion11.pt')
+            min_test_loss = epoch_test_loss
 
 
 epochs = [i for i in range(num_epochs)]
@@ -133,4 +138,4 @@ plt.plot(epochs, train_loss, label='Train Loss')
 plt.plot(epochs, test_loss, label='Test Loss')
 plt.title('Loss')
 plt.ylabel('Epochs')
-plt.savefig('/home/kk2720/dl/diffusion-model/plots/simple_diffusion_loss9.jpeg')
+plt.savefig('/home/kk2720/dl/diffusion-model/plots/simple_diffusion_loss11.jpeg')
