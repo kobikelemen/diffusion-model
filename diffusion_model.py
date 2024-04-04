@@ -14,7 +14,7 @@ from math import sqrt
 from unet import UNet
 
 learning_rate = 1e-3
-num_epochs = 15
+num_epochs = 10
 batch_size = 20
 # beta = 0.01
 # min_beta = 10**-4
@@ -26,6 +26,24 @@ img_w = 28
 img_h = 28
 data_path = './data'
 device = 'cuda:0'
+
+def calc_beta(min_b, max_b, t, max_t):
+    beta = min_b + (t/max_t) * (max_b - min_b) 
+    return beta
+
+def calc_lists(min_b, max_b, num_steps):
+    at_hat_ = 1
+    beta_list_, at_list_, at_hat_list_ = [], [], []
+    for t in range(timesteps):
+        b = calc_beta(min_b, max_b, t, num_steps)
+        beta_list_.append(b)
+        at_list_.append(1-b)
+        at_hat_ *= (1-b)
+        at_hat_list_.append(at_hat_)
+    return torch.tensor(beta_list_).to(device), torch.tensor(at_list_).to(device), torch.tensor(at_hat_list_).to(device)
+
+
+beta_list, at_list, at_hat_list = calc_lists(min_beta, max_beta, timesteps)
 
 transform = transforms.Compose([
     transforms.ToTensor(),
@@ -44,23 +62,17 @@ loader_test = DataLoader(test_dat, batch_size, shuffle=False, generator=torch.Ge
 
 def calc_xt(epsilon, t, x0):
     """ Note: this assumes beta doesn't vary with time step """
-    # at = (1 - beta) ** t
-    # at_hat = torch.ones((batch_size,))
-    # for i in range(batch_size):
-    #     for j in range(t[i]):
-    #         at_hat[i] *= (1 - calc_beta(min_beta, max_beta, j, timesteps))
-    # at_hat = (1 - calc_beta(min_beta, max_beta, t, timesteps)) ** t
-    at_hat = 1
-    for s in range(1,t[0]+1):
-        at_hat *= (1 - calc_beta(min_beta, max_beta, s, timesteps))
-    # print(f'at: {at.shape} x0: {x0.shape} epsilon: {epsilon.shape}')
-    # return torch.sqrt(at_hat.view(batch_size,1,1,1)) * x0 + torch.sqrt(1 - at_hat.view(batch_size,1,1,1)) * epsilon
-    return sqrt(at_hat) * x0 + sqrt(1 - at_hat) * epsilon
+    # at_hat = 1
+    # for s in range(1,t[0]+1):
+    #     at_hat *= (1 - calc_beta(min_beta, max_beta, s, timesteps))
+    at_hat = at_hat_list[t]
+    # return torch.sqrt(at_hat) * x0 + torch.sqrt(1 - at_hat) * epsilon
+    return torch.sqrt(at_hat.view(batch_size,1,1,1)) * x0 + torch.sqrt(1 - at_hat.view(batch_size,1,1,1)) * epsilon
 
 def sample_t(batch_size, timesteps):
-    t = random.randint(1,timesteps)
-    return torch.full((batch_size,), t)
-    # return torch.randint(1, timesteps, (batch_size,))
+    # t = random.randint(1,timesteps)
+    # return torch.full((batch_size,), t)
+    return torch.randint(1, timesteps, (batch_size,))
 
 def sample_epsilon(batch_size, img_h, img_w):
     return torch.normal(torch.zeros((batch_size, 1, img_h, img_w)), torch.ones((batch_size, 1, img_h, img_w)))
@@ -68,9 +80,6 @@ def sample_epsilon(batch_size, img_h, img_w):
 def calc_loss(epsilon, epsilon_pred):
     return torch.linalg.vector_norm(epsilon - epsilon_pred)
 
-def calc_beta(min_b, max_b, t, max_t):
-    beta = min_b + (t/max_t) * (max_b - min_b) 
-    return beta
 
 torch.set_default_device(device)
 model = UNet(num_steps=timesteps).to(device)
@@ -92,10 +101,8 @@ for epoch in range(num_epochs):
             data = data.to(device)
             epsilon = sample_epsilon(batch_size, img_h, img_w)
             t = sample_t(batch_size, timesteps)
-            # beta = calc_beta(min_beta, max_beta, t, timesteps)
             xt = calc_xt(epsilon, t, data)
             epsilon_pred = model(xt, t)
-            # loss = calc_loss(epsilon, epsilon_pred)
             loss = mse(epsilon, epsilon_pred)
             loss.backward()
             optimizer.step()
@@ -104,8 +111,6 @@ for epoch in range(num_epochs):
             if batch_idx % 20 == 0:
                 tepoch.set_description(f"Train Epoch {epoch}")
                 tepoch.set_postfix(loss=epoch_train_loss)
-        # print(f'Train Loss: {epoch_train_loss / (len(tepoch) * batch_size)}')
-        # train_loss.append(epoch_train_loss / (len(tepoch) * batch_size))
         print(f'Train Loss: {epoch_train_loss}')
         train_loss.append(epoch_train_loss)
 
@@ -115,10 +120,8 @@ for epoch in range(num_epochs):
                 with torch.no_grad():
                     epsilon = sample_epsilon(batch_size, img_h, img_w)
                     t = sample_t(batch_size, timesteps)
-                    # beta = calc_beta(min_beta, max_beta, t, timesteps)
                     xt = calc_xt(epsilon, t, data)
                     epsilon_pred = model(xt, t)
-                    # loss = calc_loss(epsilon, epsilon_pred)
                     loss = mse(epsilon, epsilon_pred)
                     epoch_test_loss += loss.item() * len(data) / len(loader_test.dataset)
                     if batch_idx % 20 == 0:
@@ -129,7 +132,7 @@ for epoch in range(num_epochs):
         
 
         if epoch_test_loss < min_test_loss:
-            torch.save(model.state_dict(), '/home/kk2720/dl/diffusion-model/model/mnist_simple_diffusion11.pt')
+            torch.save(model.state_dict(), '/home/kk2720/dl/diffusion-model/model/mnist_simple_diffusion12.pt')
             min_test_loss = epoch_test_loss
 
 
@@ -138,4 +141,4 @@ plt.plot(epochs, train_loss, label='Train Loss')
 plt.plot(epochs, test_loss, label='Test Loss')
 plt.title('Loss')
 plt.ylabel('Epochs')
-plt.savefig('/home/kk2720/dl/diffusion-model/plots/simple_diffusion_loss11.jpeg')
+plt.savefig('/home/kk2720/dl/diffusion-model/plots/simple_diffusion_loss12.jpeg')
