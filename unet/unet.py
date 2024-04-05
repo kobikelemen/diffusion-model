@@ -1,9 +1,3 @@
-"""
-Original unet implementation:
-https://github.com/Camaltra/this-is-not-real-aerial-imagery/blob/main/src/ai/models/u_net.py 
-"""
-
-
 import torch
 import torch.nn as nn
 from .utils import default

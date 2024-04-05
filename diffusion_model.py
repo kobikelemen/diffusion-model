@@ -1,139 +1,87 @@
-import random
-import os
-import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, sampler
-from torchvision import datasets, transforms
-from torchvision.utils import save_image, make_grid
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
 import tqdm
-from math import sqrt
-
-# from unet import UNet
-from unet.unet import OneResUNet
-
-learning_rate = 2e-4
-num_epochs = 10
-batch_size = 128
-# beta = 0.01
-min_beta = 10**-4
-max_beta = 0.02
-# min_beta = 0.01
-# max_beta = 0.01
-timesteps = 1000
-img_w = 32
-img_h = 32
-img_c = 3
-data_path = './data'
-device = 'cuda:0'
-
-def calc_beta(min_b, max_b, t, max_t):
-    beta = min_b + (t/max_t) * (max_b - min_b) 
-    return beta
-
-def calc_lists(min_b, max_b, num_steps):
-    at_hat_ = 1
-    beta_list_, at_list_, at_hat_list_ = [], [], []
-    for t in range(timesteps):
-        b = calc_beta(min_b, max_b, t, num_steps)
-        beta_list_.append(b)
-        at_list_.append(1-b)
-        at_hat_ *= (1-b)
-        at_hat_list_.append(at_hat_)
-    return torch.tensor(beta_list_).to(device), torch.tensor(at_list_).to(device), torch.tensor(at_hat_list_).to(device)
 
 
-beta_list, at_list, at_hat_list = calc_lists(min_beta, max_beta, timesteps)
+class Trainer():
 
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Lambda(lambda x: (x - 0.5) * 2)
-])
+    def __init__(self, batch_size, timesteps, num_epochs, model, optimizer, loader_test, loader_train, img_c, img_w, img_h, rank, at_hat_list):
+        self.batch_size = batch_size
+        self.timesteps = timesteps
+        self.num_epochs = num_epochs
+        self.model = model
+        self.optimizer = optimizer
+        self.loader_test = loader_test
+        self.loader_train = loader_train
+        self.img_c = img_c
+        self.img_w = img_w
+        self.img_h = img_h
+        self.rank = rank
+        self.at_hat_list = at_hat_list
 
-train_dat = datasets.CIFAR10(data_path, train=True, download=True, transform=transform)
-test_dat = datasets.CIFAR10(data_path, train=False, transform=transform)
+    
+    def _calc_xt(self, epsilon, t, x0):
+        """ Note: this assumes beta doesn't vary with time step """
+        at_hat = self.at_hat_list[t]
+        return torch.sqrt(at_hat.view(self.batch_size,1,1,1).repeat(1,self.img_c,1,1)) * x0 + torch.sqrt(1 - at_hat.view(self.batch_size,1,1,1).repeat(1,self.img_c,1,1)) * epsilon
+    
 
-loader_train = DataLoader(train_dat, batch_size, shuffle=True, generator=torch.Generator(device=device))
-loader_test = DataLoader(test_dat, batch_size, shuffle=False, generator=torch.Generator(device=device))
+    def _sample_t(self, batch_size, timesteps):
+        return torch.randint(1, timesteps, (batch_size,))
+    
 
+    def _sample_epsilon(self, batch_size, img_h, img_w):
+        return torch.normal(torch.zeros((batch_size, self.img_c, img_h, img_w)), torch.ones((batch_size, self.img_c, img_h, img_w)))
+    
 
+    def _calc_loss(self, epsilon, epsilon_pred):
+        return torch.linalg.vector_norm(epsilon - epsilon_pred)
+    
 
+    def train(self):
+        train_loss, test_loss = [], []
+        min_test_loss = 10e10
 
-
-def calc_xt(epsilon, t, x0):
-    """ Note: this assumes beta doesn't vary with time step """
-    at_hat = at_hat_list[t]
-    return torch.sqrt(at_hat.view(batch_size,1,1,1).repeat(1,img_c,1,1)) * x0 + torch.sqrt(1 - at_hat.view(batch_size,1,1,1).repeat(1,img_c,1,1)) * epsilon
-
-def sample_t(batch_size, timesteps):
-    return torch.randint(1, timesteps, (batch_size,))
-
-def sample_epsilon(batch_size, img_h, img_w):
-    return torch.normal(torch.zeros((batch_size, img_c, img_h, img_w)), torch.ones((batch_size, img_c, img_h, img_w)))
-
-def calc_loss(epsilon, epsilon_pred):
-    return torch.linalg.vector_norm(epsilon - epsilon_pred)
-
-
-torch.set_default_device(device)
-model = OneResUNet(32, channels=img_c).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print("Total number of parameters is: {}".format(params))
-
-
-train_loss, test_loss = [], []
-min_test_loss = 10e10
-
-for epoch in range(num_epochs):
-    epoch_train_loss = 0
-    epoch_test_loss = 0
-    mse = nn.MSELoss()
-    with tqdm.tqdm(loader_train, unit="batch") as tepoch:
-        for batch_idx, (data, _) in enumerate(tepoch):
-            data = data.to(device)
-            epsilon = sample_epsilon(batch_size, img_h, img_w)
-            t = sample_t(batch_size, timesteps)
-            xt = calc_xt(epsilon, t, data)
-            epsilon_pred = model(xt, t)
-            loss = mse(epsilon, epsilon_pred)
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-            epoch_train_loss += loss.item() * len(data) / len(loader_train.dataset)
-            if batch_idx % 20 == 0:
-                tepoch.set_description(f"Train Epoch {epoch}")
-                tepoch.set_postfix(loss=epoch_train_loss)
-        print(f'Train Loss: {epoch_train_loss}')
-        train_loss.append(epoch_train_loss)
-
-        with tqdm.tqdm(loader_test, unit="batch") as tepoch:
-            for batch_idx, (data, _) in enumerate(tepoch):
-                data = data.to(device)
-                with torch.no_grad():
-                    epsilon = sample_epsilon(batch_size, img_h, img_w)
-                    t = sample_t(batch_size, timesteps)
-                    xt = calc_xt(epsilon, t, data)
-                    epsilon_pred = model(xt, t)
+        for epoch in range(self.num_epochs):
+            epoch_train_loss = 0
+            epoch_test_loss = 0
+            mse = nn.MSELoss()
+            with tqdm.tqdm(self.loader_train, unit="batch") as tepoch:
+                for batch_idx, (data, _) in enumerate(tepoch):
+                    data = data.to(f'cuda:{self.rank}')
+                    epsilon = self._sample_epsilon(self.batch_size, self.img_h, self.img_w)
+                    t = self._sample_t(self.batch_size, self.timesteps)
+                    xt = self._calc_xt(epsilon, t, data)
+                    epsilon_pred = self.model(xt, t)
                     loss = mse(epsilon, epsilon_pred)
-                    epoch_test_loss += loss.item() * len(data) / len(loader_test.dataset)
+                    loss.backward()
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    epoch_train_loss += loss.item() * len(data) / len(self.loader_train.dataset)
                     if batch_idx % 20 == 0:
                         tepoch.set_description(f"Train Epoch {epoch}")
-                        tepoch.set_postfix(loss=epoch_test_loss)
-            print(f'Test Loss: {epoch_test_loss}')
-            test_loss.append(epoch_test_loss)
+                        tepoch.set_postfix(loss=epoch_train_loss)
+                print(f'[Rank {self.rank}] Train Loss: {epoch_train_loss}')
+                train_loss.append(epoch_train_loss)
+
+                with tqdm.tqdm(self.loader_test, unit="batch") as tepoch:
+                    for batch_idx, (data, _) in enumerate(tepoch):
+                        data = data.to(f'cuda:{self.rank}')
+                        with torch.no_grad():
+                            epsilon = self._sample_epsilon(self.batch_size, self.img_h, self.img_w)
+                            t = self._sample_t(self.batch_size, self.timesteps)
+                            xt = self._calc_xt(epsilon, t, data)
+                            epsilon_pred = self.model(xt, t)
+                            loss = mse(epsilon, epsilon_pred)
+                            epoch_test_loss += loss.item() * len(data) / len(self.loader_test.dataset)
+                            if batch_idx % 20 == 0:
+                                tepoch.set_description(f"Train Epoch {epoch}")
+                                tepoch.set_postfix(loss=epoch_test_loss)
+                    print(f'[Rank {self.rank}] Test Loss: {epoch_test_loss}')
+                    test_loss.append(epoch_test_loss)
+                
+                if epoch_test_loss < min_test_loss:
+                    torch.save(self.model.state_dict(), '/home/kk2720/dl/diffusion-model/model/cifar_simple_diffusion1.pt')
+                    min_test_loss = epoch_test_loss
         
-
-        if epoch_test_loss < min_test_loss:
-            torch.save(model.state_dict(), '/home/kk2720/dl/diffusion-model/model/cifar_simple_diffusion1.pt')
-            min_test_loss = epoch_test_loss
-
-
-epochs = [i for i in range(num_epochs)]
-plt.plot(epochs, train_loss, label='Train Loss')
-plt.plot(epochs, test_loss, label='Test Loss')
-plt.title('Loss')
-plt.ylabel('Epochs')
-plt.savefig('/home/kk2720/dl/diffusion-model/plots/cifar_diffusion_loss1.jpeg')
+        return train_loss, test_loss
