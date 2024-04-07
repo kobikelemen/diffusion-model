@@ -21,7 +21,6 @@ class Trainer():
 
     
     def _calc_xt(self, epsilon, t, x0):
-        """ Note: this assumes beta doesn't vary with time step """
         at_hat = self.at_hat_list[t]
         return torch.sqrt(at_hat.view(self.batch_size,1,1,1).repeat(1,self.img_c,1,1)) * x0 + torch.sqrt(1 - at_hat.view(self.batch_size,1,1,1).repeat(1,self.img_c,1,1)) * epsilon
     
@@ -58,10 +57,11 @@ class Trainer():
                     self.optimizer.step()
                     self.optimizer.zero_grad()
                     epoch_train_loss += loss.item() * len(data) / len(self.loader_train.dataset)
-                    if batch_idx % 20 == 0:
-                        tepoch.set_description(f"Train Epoch {epoch}")
+                    if batch_idx % 20 == 0 and self.rank==0:
+                        tepoch.set_description(f"[Rank {self.rank}] Train Epoch {epoch}")
                         tepoch.set_postfix(loss=epoch_train_loss)
-                print(f'[Rank {self.rank}] Train Loss: {epoch_train_loss}')
+                # if self.rank == 0:
+                #     print(f'[Rank {self.rank}] Epoch: {} Train Loss: {epoch_train_loss}')
                 train_loss.append(epoch_train_loss)
 
                 with tqdm.tqdm(self.loader_test, unit="batch") as tepoch:
@@ -74,13 +74,14 @@ class Trainer():
                             epsilon_pred = self.model(xt, t)
                             loss = mse(epsilon, epsilon_pred)
                             epoch_test_loss += loss.item() * len(data) / len(self.loader_test.dataset)
-                            if batch_idx % 20 == 0:
-                                tepoch.set_description(f"Train Epoch {epoch}")
+                            if batch_idx % 20 == 0 and self.rank==0:
+                                tepoch.set_description(f"[Rank {self.rank}] Train Epoch {epoch}")
                                 tepoch.set_postfix(loss=epoch_test_loss)
-                    print(f'[Rank {self.rank}] Test Loss: {epoch_test_loss}')
+                    if self.rank == 0:
+                        print(f'[Rank {self.rank}] Epoch: {epoch} Train Loss: {epoch_train_loss} Test Loss: {epoch_test_loss}')
                     test_loss.append(epoch_test_loss)
                 
-                if epoch_test_loss < min_test_loss:
+                if epoch_test_loss < min_test_loss and self.rank == 0:
                     torch.save(self.model.state_dict(), '/home/kk2720/dl/diffusion-model/model/cifar_simple_diffusion1.pt')
                     min_test_loss = epoch_test_loss
         

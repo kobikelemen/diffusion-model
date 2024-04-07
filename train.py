@@ -84,6 +84,7 @@ def train(rank, world_size):
     print("Total number of parameters is: {}".format(params))
     trainer = Trainer(batch_size, timesteps, num_epochs, model, optimizer, loader_test, loader_train, img_c, img_w, img_h, rank, at_hat_list)
     train_loss, test_loss = trainer.train()
+    print(f'[Rank {rank}] train + test loss: {train_loss} {test_loss}')
 
 
     epochs = [i for i in range(num_epochs)]
@@ -91,7 +92,7 @@ def train(rank, world_size):
     plt.plot(epochs, test_loss, label='Test Loss')
     plt.title('Loss')
     plt.ylabel('Epochs')
-    plt.savefig('/home/kk2720/dl/diffusion-model/plots/cifar_diffusion_loss1.jpeg')
+    plt.savefig(f'/home/kk2720/dl/diffusion-model/plots/cifar_diffusion_loss_rank{rank}.jpeg')
     cleanup()
 
 if __name__ == '__main__':
