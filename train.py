@@ -10,7 +10,7 @@ from torchvision import datasets, transforms
 from torchvision.utils import save_image, make_grid
 import matplotlib.pyplot as plt
 from math import sqrt
-from unet.unet import OneResUNet
+from unet.unet import OneResUNet, AttentionUNet
 from diffusion_model import Trainer
 
 NUM_GPUS = 4
@@ -62,8 +62,8 @@ def train(rank, world_size):
     setup(rank, world_size)
     torch.set_default_device(f'cuda:{rank}')
 
-    learning_rate = 2e-4
-    num_epochs = 2000
+    learning_rate = 1*(10**-5)
+    num_epochs = 500
     batch_size = 100
     min_beta = 10**-4
     max_beta = 0.02
@@ -73,19 +73,18 @@ def train(rank, world_size):
     img_c = 3
     data_path = './data'
     beta_list, at_list, at_hat_list = calc_lists(min_beta, max_beta, timesteps, rank)
-
+    print(f'beta_list: {beta_list}')
     transform = transforms.Compose([transforms.ToTensor(), transforms.Lambda(lambda x: (x - 0.5) * 2)])
     loader_train = prepare_train(rank, world_size, batch_size, data_path, transform)
     loader_test = prepare_test(rank, world_size, batch_size, data_path, transform)
-    model = OneResUNet(32, channels=img_c).to(rank)
+    model = AttentionUNet(32, channels=img_c, dim_mults=(1, 2, 4, 8)).to(rank)
     model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("Total number of parameters is: {}".format(params))
-    trainer = Trainer(batch_size, timesteps, num_epochs, model, optimizer, loader_test, loader_train, img_c, img_w, img_h, rank, at_hat_list)
+    trainer = Trainer(batch_size, timesteps, num_epochs, model, optimizer, loader_test, loader_train, img_c, img_w, img_h, rank, world_size, at_hat_list)
     train_loss, test_loss = trainer.train()
     print(f'[Rank {rank}] train + test loss: {train_loss} {test_loss}')
-
 
     epochs = [i for i in range(num_epochs)]
     plt.plot(epochs, train_loss, label='Train Loss')

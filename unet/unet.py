@@ -390,7 +390,7 @@ if __name__ == "__main__":
     timestamp_in = torch.randn(1).to("cuda:0")
 
     models = [
-        OneResUNet(64, channels=3).to("cuda:0"),
+        OneResUNet(32, channels=3).to("cuda:0"),
         # TwoResUNet(64, channels=3).to("mps"),
         # AttentionUNet(64, channels=3).to("mps")
     ]

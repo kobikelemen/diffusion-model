@@ -1,14 +1,14 @@
 import torch
 import torch.nn as nn
 import tqdm
-
+import time
 
 class Trainer():
 
-    def __init__(self, batch_size, timesteps, num_epochs, model, optimizer, loader_test, loader_train, img_c, img_w, img_h, rank, at_hat_list):
+    def __init__(self, batch_size, timesteps, num_epochs, model, optimizer, loader_test, loader_train, img_c, img_w, img_h, rank, world_size, at_hat_list):
         self.batch_size = batch_size
         self.timesteps = timesteps
-        self.num_epochs = num_epochs
+        self.num_epochs = int(num_epochs / world_size)
         self.model = model
         self.optimizer = optimizer
         self.loader_test = loader_test
@@ -17,6 +17,7 @@ class Trainer():
         self.img_w = img_w
         self.img_h = img_h
         self.rank = rank
+        self.word_size = world_size
         self.at_hat_list = at_hat_list
 
     
@@ -47,6 +48,7 @@ class Trainer():
             mse = nn.MSELoss()
             with tqdm.tqdm(self.loader_train, unit="batch") as tepoch:
                 for batch_idx, (data, _) in enumerate(tepoch):
+                    self.optimizer.zero_grad()
                     data = data.to(f'cuda:{self.rank}')
                     epsilon = self._sample_epsilon(self.batch_size, self.img_h, self.img_w)
                     t = self._sample_t(self.batch_size, self.timesteps)
@@ -55,7 +57,6 @@ class Trainer():
                     loss = mse(epsilon, epsilon_pred)
                     loss.backward()
                     self.optimizer.step()
-                    self.optimizer.zero_grad()
                     epoch_train_loss += loss.item() * len(data) / len(self.loader_train.dataset)
                     if batch_idx % 20 == 0 and self.rank==0:
                         tepoch.set_description(f"[Rank {self.rank}] Train Epoch {epoch}")
@@ -82,7 +83,8 @@ class Trainer():
                     test_loss.append(epoch_test_loss)
                 
                 if epoch_test_loss < min_test_loss and self.rank == 0:
-                    torch.save(self.model.state_dict(), '/home/kk2720/dl/diffusion-model/model/cifar_simple_diffusion1.pt')
+                    print('Saving model')
+                    torch.save(self.model.state_dict(), '/home/kk2720/dl/diffusion-model/model/cifar_simple_diffusion8.pt')
                     min_test_loss = epoch_test_loss
         
         return train_loss, test_loss
